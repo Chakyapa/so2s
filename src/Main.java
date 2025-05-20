@@ -1,137 +1,96 @@
+import java.util.concurrent.locks.ReentrantLock;
 
-import java.util.*;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+public class Main{
+    private static final int NUM_PHILOSOPHERS = 7; // Например: номер по списку 7 => 7 + 10
+    private static final int CYCLES = 5; // Количество итераций размышлений/еды
 
-class Library {
-    static int books;
-    Writer[] writers;
-    Reader[] readers;
+    private final ReentrantLock[] forks = new ReentrantLock[NUM_PHILOSOPHERS];
 
-    static ArrayList<String> library = new ArrayList<>();
-    static final ReentrantReadWriteLock rwl = new
-            ReentrantReadWriteLock(true);
-    static final Lock writeLock = rwl.writeLock();
-    static final Lock readLock = rwl.readLock();
-
-    public Library (int writers, int readers, int books) {
-        this.writers = new Writer[writers];
-        this.readers = new Reader[readers];
-        Library.books = books;
-
-        for (int i = 0; i < writers; i++) {
-            this.writers[i] = new Writer("Writer " + (i+1));
-        }
-        for (int i = 0; i < readers; i++) {
-            this.readers[i] = new Reader("Reader " + (i+1));
+    public Main() {
+        for (int i = 0; i < NUM_PHILOSOPHERS; i++) {
+            forks[i] = new ReentrantLock(true); // true => fair lock
         }
     }
 
-    public void start() {
-        for (Writer writer : this.writers) {
-            writer.start();
+    class Philosopher extends Thread {
+        private final int id;
+
+        public Philosopher(int id) {
+            this.id = id;
         }
-        for (Reader reader : this.readers) {
-            reader.start();
-        }
-    }
-}
 
+        @Override
+        public void run() {
+            int left = id;
+            int right = (id + 1) % NUM_PHILOSOPHERS;
 
+            for (int i = 0; i < CYCLES; i++) {
+                think();
 
-
-class Writer extends Thread {
-    String name;
-    ArrayList<String> bookList = new
-            ArrayList<>(Arrays.asList("Civil War", "Endgame", "Infinity Gauntlet",
-            "Black Panther"));
-
-    public final Lock writeLock = Library.writeLock;
-    ArrayList<String> library = Library.library;
-    ArrayList<String> writtenBooks = new ArrayList<>();
-    static int count = 0;
-
-    public Writer (String name) {
-        this.name = name;
-    }
-
-    @Override
-    public void run() {
-
-        while(library.size() < Library.books){
-            try {
-                writeLock.lock();
-                if (library.size() < Library.books){
-                    String randomBook = bookList.get(count);
-                    if (!library.contains(randomBook)){
-                        sleep(1000);
-                        library.add(randomBook);
-                        writtenBooks.add(randomBook);
-                        System.out.println(name + " wrote " + randomBook);
-                        count++;
-                        sleep(100);
+                boolean eaten = false;
+                while (!eaten) {
+                    // Чередуем порядок захвата вилок, чтобы избежать deadlock
+                    if (id % 2 == 0) {
+                        eaten = tryEat(left, right);
+                    } else {
+                        eaten = tryEat(right, left);
                     }
                 }
             }
-            catch (Exception e){
-                e.printStackTrace();
-            }
-            finally {
-                writeLock.unlock();
-            }
-            if (library.size() == Library.books){
-                System.out.println(name + " book list: \n" + writtenBooks);
-            }
+
+            System.out.println("Философ " + id + " завершил цикл.");
         }
 
-    }
-}
-
-class Reader extends Thread {
-    public final Lock readLock = Library.readLock;
-    ArrayList<String> readBooks = new ArrayList<>();
-    ArrayList<String> library = Library.library;
-    String name;
-
-    public Reader(String name) {
-        this.name = name;
-    }
-
-    @Override
-    public void run() {
-        while(readBooks.size() < Library.books){
+        private void think() {
+            System.out.println("Философ " + id + " размышляет.");
             try {
-                if (Library.rwl.isWriteLocked()){
-                    System.out.println(name + ": writer is in library");
-                }
-                readLock.lock();
-                int random = (int)(Math.random()*library.size());
-                if(random < library.size()) {
-                    String randomBook = library.get(random);
+                Thread.sleep((long) (Math.random() * 500));
+            } catch (InterruptedException ignored) {}
+        }
 
-                    if(readBooks.size() < Library.books){
-                        if(!readBooks.contains(randomBook)){
-                            sleep(300);
-                            readBooks.add(randomBook);
-                            System.out.println(name + " read book " + randomBook);
+        private boolean tryEat(int firstFork, int secondFork) {
+            if (forks[firstFork].tryLock()) {
+                try {
+                    if (forks[secondFork].tryLock()) {
+                        try {
+                            System.out.println("Философ " + id + " ест.");
+                            Thread.sleep((long) (Math.random() * 500));
+                        } catch (InterruptedException ignored) {}
+                        finally {
+                            forks[secondFork].unlock();
                         }
+                        return true;
                     }
+                } finally {
+                    forks[firstFork].unlock();
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
-            } finally {
             }
-            readLock.unlock();
+
+            // Не удалось взять обе вилки
+            try {
+                Thread.sleep(10); // Немного подождать перед повторной попыткой
+            } catch (InterruptedException ignored) {}
+            return false;
         }
-        System.out.println(name + " finished reading \n" + readBooks);
     }
-}
-public class Main {
+
+    public void startDinner() {
+        Thread[] philosophers = new Thread[NUM_PHILOSOPHERS];
+        for (int i = 0; i < NUM_PHILOSOPHERS; i++) {
+            philosophers[i] = new Philosopher(i);
+            philosophers[i].start();
+        }
+
+        for (int i = 0; i < NUM_PHILOSOPHERS; i++) {
+            try {
+                philosophers[i].join();
+            } catch (InterruptedException ignored) {}
+        }
+
+        System.out.println("Ужин завершён.");
+    }
+
     public static void main(String[] args) {
-        final int writers = 3;
-        final int readers = 5;
-        final int books = 4;
-        Library library = new Library(writers, readers, books);
-        library.start();
+        new Main().startDinner();
     }
 }
